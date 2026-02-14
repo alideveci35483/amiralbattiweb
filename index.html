@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amiral Battı - Online Multiplayer</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // ⚠️ ÖNEMLİ: BU ALANI KENDİ FİREBASE BİLGİLERİNİZLE DEĞİŞTİRİN
+        const firebaseConfig = {
+  apiKey: "AIzaSyDAGg4FIf90vP9Ac20Ob44oehP1RPQi0eA",
+  authDomain: "amiral-batti-68b2b.firebaseapp.com",
+  databaseURL: "https://amiral-batti-68b2b-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "amiral-batti-68b2b",
+  storageBucket: "amiral-batti-68b2b.firebasestorage.app",
+  messagingSenderId: "901776562585",
+  appId: "1:901776562585:web:a878a398edb358ba019b08"
+};
+
+        // Firebase'i başlat
+        let database;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            database = firebase.database();
+        } catch (error) {
+            console.error("Firebase başlatma hatası:", error);
+        }
+
+        const { useState, useEffect, useRef } = React;
+
+        // Icons
+        const Anchor = ({ className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+                <circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/>
+            </svg>
+        );
+
+        const Waves = ({ className, strokeWidth = 2, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+                <path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>
+            </svg>
+        );
+
+        const Trophy = ({ className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+            </svg>
+        );
+
+        const Target = ({ className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+                <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+            </svg>
+        );
+
+        const Users = ({ className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+        );
+
+        const AmiraLBattiOnline = () => {
+            const GRID_SIZE = 10;
+            const SHIPS = [
+                { name: 'Zırhlı', size: 5, emoji: '🚢' },
+                { name: 'Kruvazör', size: 4, emoji: '⛴️' },
+                { name: 'Destroyer', size: 3, emoji: '🛥️' },
+                { name: 'Denizaltı', size: 3, emoji: '🚤' },
+                { name: 'Devriye', size: 2, emoji: '⛵' }
+            ];
+
+            // Local states
+            const [screen, setScreen] = useState('home'); // home, lobby, game
+            const [roomCode, setRoomCode] = useState('');
+            const [playerName, setPlayerName] = useState('');
+            const [myPlayerId, setMyPlayerId] = useState(null);
+            const [inputRoomCode, setInputRoomCode] = useState('');
+            
+            // Game states from Firebase
+            const [gameState, setGameState] = useState(null);
+            const [myBoard, setMyBoard] = useState(null);
+            const [currentShipIndex, setCurrentShipIndex] = useState(0);
+            const [shipOrientation, setShipOrientation] = useState('horizontal');
+            const [hoveredCell, setHoveredCell] = useState(null);
+            const [targetPlayer, setTargetPlayer] = useState(null);
+            const [lastShotResult, setLastShotResult] = useState(null);
+            
+            const gameRef = useRef(null);
+
+            // Generate room code
+            const generateRoomCode = () => {
+                return Math.random().toString(36).substring(2, 8).toUpperCase();
+            };
+
+            // Create room
+            const createRoom = async () => {
+                if (!playerName.trim()) {
+                    alert('Lütfen isminizi girin!');
+                    return;
+                }
+
+                const code = generateRoomCode();
+                const playerId = 'p1';
+                
+                const initialGameState = {
+                    roomCode: code,
+                    players: {
+                        p1: { name: playerName, ready: false, board: null }
+                    },
+                    phase: 'lobby', // lobby, setup, playing, finished
+                    currentPlayer: null,
+                    winner: null,
+                    createdAt: Date.now()
+                };
+
+                try {
+                    await database.ref('games/' + code).set(initialGameState);
+                    setRoomCode(code);
+                    setMyPlayerId(playerId);
+                    setScreen('lobby');
+                } catch (error) {
+                    alert('Oda oluşturulamadı: ' + error.message);
+                }
+            };
+
+            // Join room
+            const joinRoom = async () => {
+                if (!playerName.trim()) {
+                    alert('Lütfen isminizi girin!');
+                    return;
+                }
+                if (!inputRoomCode.trim()) {
+                    alert('Lütfen oda kodunu girin!');
+                    return;
+                }
+
+                const code = inputRoomCode.toUpperCase();
+                
+                try {
+                    const snapshot = await database.ref('games/' + code).once('value');
+                    const game = snapshot.val();
+                    
+                    if (!game) {
+                        alert('Bu kodla bir oda bulunamadı!');
+                        return;
+                    }
+
+                    const playerCount = Object.keys(game.players || {}).length;
+                    if (playerCount >= 3) {
+                        alert('Bu oda dolu! (3/3 oyuncu)');
+                        return;
+                    }
+
+                    const playerId = 'p' + (playerCount + 1);
+                    
+                    await database.ref('games/' + code + '/players/' + playerId).set({
+                        name: playerName,
+                        ready: false,
+                        board: null
+                    });
+
+                    setRoomCode(code);
+                    setMyPlayerId(playerId);
+                    setScreen('lobby');
+                } catch (error) {
+                    alert('Odaya katılınamadı: ' + error.message);
+                }
+            };
+
+            // Listen to game state
+            useEffect(() => {
+                if (!roomCode) return;
+
+                gameRef.current = database.ref('games/' + roomCode);
+                
+                const listener = gameRef.current.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setGameState(data);
+                        
+                        // Get my board
+                        if (myPlayerId && data.players[myPlayerId]?.board) {
+                            setMyBoard(data.players[myPlayerId].board);
+                        }
+                    } else {
+                        // Room deleted
+                        setScreen('home');
+                        setRoomCode('');
+                        alert('Oda kapatıldı!');
+                    }
+                });
+
+                return () => {
+                    if (gameRef.current) {
+                        gameRef.current.off('value', listener);
+                    }
+                };
+            }, [roomCode, myPlayerId]);
+
+            // Auto-start game when all ready
+            useEffect(() => {
+                if (!gameState || gameState.phase !== 'lobby') return;
+                
+                const players = Object.values(gameState.players || {});
+                if (players.length === 3 && players.every(p => p.ready)) {
+                    database.ref('games/' + roomCode).update({
+                        phase: 'playing',
+                        currentPlayer: 'p1'
+                    });
+                }
+            }, [gameState, roomCode]);
+
+            // Ship placement functions
+            const canPlaceShip = (board, row, col, size, orientation) => {
+                if (orientation === 'horizontal') {
+                    if (col + size > GRID_SIZE) return false;
+                    for (let i = 0; i < size; i++) {
+                        if (board[row][col + i] !== null) return false;
+                    }
+                } else {
+                    if (row + size > GRID_SIZE) return false;
+                    for (let i = 0; i < size; i++) {
+                        if (board[row + i][col] !== null) return false;
+                    }
+                }
+                return true;
+            };
+
+            const placeShip = (row, col) => {
+                if (gameState?.phase !== 'lobby' || gameState?.players[myPlayerId]?.ready) return;
+
+                const board = myBoard || Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+                const ship = SHIPS[currentShipIndex];
+
+                if (!canPlaceShip(board, row, col, ship.size, shipOrientation)) return;
+
+                if (shipOrientation === 'horizontal') {
+                    for (let i = 0; i < ship.size; i++) {
+                        board[row][col + i] = { shipIndex: currentShipIndex, partIndex: i };
+                    }
+                } else {
+                    for (let i = 0; i < ship.size; i++) {
+                        board[row + i][col] = { shipIndex: currentShipIndex, partIndex: i };
+                    }
+                }
+
+                setMyBoard(board);
+
+                if (currentShipIndex < SHIPS.length - 1) {
+                    setCurrentShipIndex(currentShipIndex + 1);
+                }
+            };
+
+            const markReady = async () => {
+                if (currentShipIndex < SHIPS.length - 1) {
+                    alert('Lütfen önce tüm gemileri yerleştirin!');
+                    return;
+                }
+
+                try {
+                    await database.ref('games/' + roomCode + '/players/' + myPlayerId).update({
+                        ready: true,
+                        board: myBoard
+                    });
+                } catch (error) {
+                    alert('Hazır durumuna geçilemedi: ' + error.message);
+                }
+            };
+
+            const autoPlaceShips = () => {
+                const board = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+                
+                for (let shipIdx = 0; shipIdx < SHIPS.length; shipIdx++) {
+                    const ship = SHIPS[shipIdx];
+                    let placed = false;
+                    let attempts = 0;
+                    
+                    while (!placed && attempts < 100) {
+                        const orientation = Math.random() > 0.5 ? 'horizontal' : 'vertical';
+                        const row = Math.floor(Math.random() * GRID_SIZE);
+                        const col = Math.floor(Math.random() * GRID_SIZE);
+                        
+                        if (canPlaceShip(board, row, col, ship.size, orientation)) {
+                            if (orientation === 'horizontal') {
+                                for (let i = 0; i < ship.size; i++) {
+                                    board[row][col + i] = { shipIndex: shipIdx, partIndex: i };
+                                }
+                            } else {
+                                for (let i = 0; i < ship.size; i++) {
+                                    board[row + i][col] = { shipIndex: shipIdx, partIndex: i };
+                                }
+                            }
+                            placed = true;
+                        }
+                        attempts++;
+                    }
+                }
+                
+                setMyBoard(board);
+                setCurrentShipIndex(SHIPS.length - 1);
+            };
+
+            // Make shot
+            const makeShot = async (row, col) => {
+                if (!gameState || gameState.phase !== 'playing') return;
+                if (gameState.currentPlayer !== myPlayerId) return;
+                if (!targetPlayer) return;
+
+                const targetBoard = gameState.players[targetPlayer]?.board;
+                if (!targetBoard) return;
+
+                // Check if already shot
+                const shots = gameState.shots || {};
+                const myShots = shots[myPlayerId] || {};
+                if (myShots[`${row}-${col}`]) return;
+
+                const hit = targetBoard[row][col] !== null;
+
+                // Update shots
+                await database.ref(`games/${roomCode}/shots/${myPlayerId}/${row}-${col}`).set(hit ? 'hit' : 'miss');
+
+                setLastShotResult({ result: hit ? 'hit' : 'miss', row, col });
+
+                // Check if target defeated
+                const targetDefeated = checkPlayerDefeated(targetPlayer);
+                
+                if (targetDefeated) {
+                    // Mark player as defeated
+                    await database.ref(`games/${roomCode}/players/${targetPlayer}/defeated`).set(true);
+                    
+                    // Check for winner
+                    const alivePlayers = Object.keys(gameState.players).filter(pid => 
+                        pid === myPlayerId || !gameState.players[pid].defeated
+                    );
+                    
+                    if (alivePlayers.length === 1) {
+                        await database.ref(`games/${roomCode}`).update({
+                            phase: 'finished',
+                            winner: myPlayerId
+                        });
+                        return;
+                    }
+                }
+
+                // Next turn or bonus turn
+                if (!hit) {
+                    setTimeout(async () => {
+                        const playerIds = Object.keys(gameState.players);
+                        const currentIndex = playerIds.indexOf(myPlayerId);
+                        let nextIndex = (currentIndex + 1) % playerIds.length;
+                        
+                        // Skip defeated players
+                        while (gameState.players[playerIds[nextIndex]]?.defeated) {
+                            nextIndex = (nextIndex + 1) % playerIds.length;
+                        }
+                        
+                        await database.ref(`games/${roomCode}/currentPlayer`).set(playerIds[nextIndex]);
+                        setTargetPlayer(null);
+                        setLastShotResult(null);
+                    }, 2000);
+                } else {
+                    setTimeout(() => {
+                        setTargetPlayer(null);
+                        setLastShotResult(null);
+                    }, 1500);
+                }
+            };
+
+            const checkPlayerDefeated = (playerId) => {
+                const board = gameState.players[playerId]?.board;
+                if (!board) return true;
+
+                const allShots = gameState.shots || {};
+                
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    for (let j = 0; j < GRID_SIZE; j++) {
+                        if (board[i][j] !== null) {
+                            const isHit = Object.keys(allShots).some(shooterId => {
+                                if (shooterId === playerId) return false;
+                                return allShots[shooterId]?.[`${i}-${j}`] === 'hit';
+                            });
+                            if (!isHit) return false;
+                        }
+                    }
+                }
+                return true;
+            };
+
+            // Render grid
+            const renderCell = (row, col, isMyBoard, targetPlayerId = null) => {
+                const isHovered = hoveredCell?.row === row && hoveredCell?.col === col;
+                let content = '';
+                let bgColor = 'bg-blue-50';
+
+                if (isMyBoard && myBoard) {
+                    const cell = myBoard[row]?.[col];
+                    if (cell !== null) {
+                        bgColor = 'bg-emerald-400';
+                        content = SHIPS[cell.shipIndex].emoji;
+                    } else if (isHovered && !gameState?.players[myPlayerId]?.ready) {
+                        const ship = SHIPS[currentShipIndex];
+                        const cells = [];
+                        if (shipOrientation === 'horizontal') {
+                            for (let i = 0; i < ship.size && col + i < GRID_SIZE; i++) {
+                                cells.push({ row, col: col + i });
+                            }
+                        } else {
+                            for (let i = 0; i < ship.size && row + i < GRID_SIZE; i++) {
+                                cells.push({ row: row + i, col });
+                            }
+                        }
+                        const isPreview = cells.some(c => c.row === row && c.col === col);
+                        if (isPreview) {
+                            const canPlace = canPlaceShip(myBoard, row, col, ship.size, shipOrientation);
+                            bgColor = canPlace ? 'bg-emerald-200' : 'bg-red-200';
+                        }
+                    }
+                } else if (targetPlayerId && gameState) {
+                    const shots = gameState.shots?.[myPlayerId] || {};
+                    const shot = shots[`${row}-${col}`];
+                    if (shot === 'hit') {
+                        bgColor = 'bg-red-500';
+                        content = '💥';
+                    } else if (shot === 'miss') {
+                        bgColor = 'bg-blue-300';
+                        content = '💨';
+                    }
+                }
+
+                return (
+                    <div
+                        key={`${row}-${col}`}
+                        onClick={() => {
+                            if (isMyBoard && !gameState?.players[myPlayerId]?.ready) {
+                                placeShip(row, col);
+                            } else if (!isMyBoard && targetPlayerId && gameState?.currentPlayer === myPlayerId) {
+                                makeShot(row, col);
+                            }
+                        }}
+                        onMouseEnter={() => setHoveredCell({ row, col })}
+                        onMouseLeave={() => setHoveredCell(null)}
+                        className={`
+                            aspect-square border-2 border-blue-900/20 flex items-center justify-center
+                            text-lg md:text-xl transition-all cursor-pointer
+                            hover:border-blue-600 hover:scale-105
+                            ${bgColor}
+                        `}
+                    >
+                        {content}
+                    </div>
+                );
+            };
+
+            const renderGrid = (isMyBoard, targetPlayerId = null) => {
+                return (
+                    <div className="grid grid-cols-10 gap-0.5 bg-blue-900/10 p-2 rounded-lg shadow-xl max-w-md mx-auto">
+                        {Array(GRID_SIZE).fill(null).map((_, row) => 
+                            Array(GRID_SIZE).fill(null).map((_, col) => renderCell(row, col, isMyBoard, targetPlayerId))
+                        )}
+                    </div>
+                );
+            };
+
+            // Home Screen
+            if (screen === 'home') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-600 p-4 md:p-8 flex items-center justify-center">
+                        <div className="bg-white/95 rounded-2xl p-8 shadow-2xl max-w-md w-full">
+                            <div className="text-center mb-8">
+                                <Anchor className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                                <h1 className="text-4xl font-bold text-blue-900 mb-2">Amiral Battı</h1>
+                                <p className="text-lg text-blue-700">Online Multiplayer</p>
+                            </div>
+
+                            <div className="space-y-4 mb-6">
+                                <input
+                                    type="text"
+                                    value={playerName}
+                                    onChange={(e) => setPlayerName(e.target.value)}
+                                    placeholder="İsminizi girin"
+                                    className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg text-lg focus:border-blue-600 focus:outline-none"
+                                    maxLength={15}
+                                />
+                            </div>
+
+                            <div className="space-y-3">
+                                <button
+                                    onClick={createRoom}
+                                    className="w-full px-6 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xl transition-all transform hover:scale-105"
+                                >
+                                    🎮 Yeni Oda Oluştur
+                                </button>
+
+                                <div className="relative">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <div className="w-full border-t border-gray-300"></div>
+                                    </div>
+                                    <div className="relative flex justify-center text-sm">
+                                        <span className="px-2 bg-white text-gray-500">veya</span>
+                                    </div>
+                                </div>
+
+                                <input
+                                    type="text"
+                                    value={inputRoomCode}
+                                    onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())}
+                                    placeholder="Oda kodu (örn: ABC123)"
+                                    className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg text-lg focus:border-blue-600 focus:outline-none uppercase"
+                                    maxLength={6}
+                                />
+
+                                <button
+                                    onClick={joinRoom}
+                                    className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xl transition-all transform hover:scale-105"
+                                >
+                                    🚪 Odaya Katıl
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Lobby & Game Screens
+            if (!gameState) {
+                return <div className="min-h-screen flex items-center justify-center">Yükleniyor...</div>;
+            }
+
+            const playerIds = Object.keys(gameState.players || {});
+            const myPlayerData = gameState.players[myPlayerId];
+            const isMyTurn = gameState.currentPlayer === myPlayerId;
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-600 p-4 md:p-8">
+                    <div className="max-w-4xl mx-auto">
+                        {/* Header */}
+                        <div className="text-center mb-6">
+                            <div className="flex items-center justify-center gap-3 mb-4">
+                                <Anchor className="w-12 h-12 text-yellow-300" />
+                                <h1 className="text-4xl md:text-5xl font-bold text-white drop-shadow-lg">
+                                    Amiral Battı
+                                </h1>
+                                <Anchor className="w-12 h-12 text-yellow-300" />
+                            </div>
+                            <div className="bg-white/90 px-6 py-2 rounded-full inline-block">
+                                <p className="text-lg font-bold text-blue-900">Oda Kodu: {roomCode}</p>
+                            </div>
+                        </div>
+
+                        {/* Lobby Phase */}
+                        {gameState.phase === 'lobby' && (
+                            <div className="bg-white/95 rounded-2xl p-6 shadow-2xl">
+                                <div className="text-center mb-6">
+                                    <Users className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                                    <h2 className="text-2xl font-bold text-blue-900 mb-2">
+                                        Oyuncular ({playerIds.length}/3)
+                                    </h2>
+                                    <p className="text-blue-700">3 oyuncu bekleniyor...</p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                                    {playerIds.map((pid) => {
+                                        const player = gameState.players[pid];
+                                        return (
+                                            <div
+                                                key={pid}
+                                                className={`p-4 rounded-lg border-2 ${
+                                                    player.ready 
+                                                        ? 'bg-green-100 border-green-500' 
+                                                        : 'bg-gray-100 border-gray-300'
+                                                }`}
+                                            >
+                                                <p className="font-bold text-lg text-center">
+                                                    {player.name}
+                                                    {pid === myPlayerId && ' (Sen)'}
+                                                </p>
+                                                <p className="text-center text-sm mt-1">
+                                                    {player.ready ? '✅ Hazır' : '⏳ Bekliyor'}
+                                                </p>
+                                            </div>
+                                        );
+                                    })}
+                                    {[...Array(3 - playerIds.length)].map((_, i) => (
+                                        <div key={`empty-${i}`} className="p-4 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
+                                            <p className="text-center text-gray-400 font-bold">Boş</p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {!myPlayerData?.ready && (
+                                    <>
+                                        <div className="text-center mb-4">
+                                            <h3 className="text-xl font-bold text-blue-900 mb-2">
+                                                Gemilerini Yerleştir
+                                            </h3>
+                                            <p className="text-blue-700">
+                                                {currentShipIndex < SHIPS.length ? (
+                                                    <>
+                                                        {SHIPS[currentShipIndex].emoji} {SHIPS[currentShipIndex].name} ({SHIPS[currentShipIndex].size} birim)
+                                                    </>
+                                                ) : (
+                                                    'Tüm gemiler yerleştirildi!'
+                                                )}
+                                            </p>
+                                        </div>
+
+                                        <div className="flex justify-center gap-3 mb-4 flex-wrap">
+                                            <button
+                                                onClick={() => setShipOrientation('horizontal')}
+                                                className={`px-4 py-2 rounded-lg font-bold ${
+                                                    shipOrientation === 'horizontal' 
+                                                        ? 'bg-blue-600 text-white' 
+                                                        : 'bg-gray-200 text-gray-700'
+                                                }`}
+                                            >
+                                                Yatay ↔️
+                                            </button>
+                                            <button
+                                                onClick={() => setShipOrientation('vertical')}
+                                                className={`px-4 py-2 rounded-lg font-bold ${
+                                                    shipOrientation === 'vertical' 
+                                                        ? 'bg-blue-600 text-white' 
+                                                        : 'bg-gray-200 text-gray-700'
+                                                }`}
+                                            >
+                                                Dikey ↕️
+                                            </button>
+                                            <button
+                                                onClick={autoPlaceShips}
+                                                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold"
+                                            >
+                                                🎲 Otomatik
+                                            </button>
+                                        </div>
+
+                                        {renderGrid(true)}
+
+                                        <div className="text-center mt-4">
+                                            <button
+                                                onClick={markReady}
+                                                className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xl"
+                                            >
+                                                ✅ Hazırım!
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+
+                                {myPlayerData?.ready && (
+                                    <div className="text-center">
+                                        <p className="text-2xl font-bold text-green-600 mb-4">✅ Hazırsın!</p>
+                                        <p className="text-blue-700">Diğer oyuncular bekleniyor...</p>
+                                        {renderGrid(true)}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Playing Phase */}
+                        {gameState.phase === 'playing' && (
+                            <div className="bg-white/95 rounded-2xl p-6 shadow-2xl">
+                                {lastShotResult && (
+                                    <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+                                        <div className={`text-6xl md:text-8xl font-bold px-8 py-6 rounded-3xl shadow-2xl transform animate-bounce ${
+                                            lastShotResult.result === 'hit' 
+                                                ? 'bg-red-600 text-white' 
+                                                : 'bg-blue-400 text-white'
+                                        }`}>
+                                            {lastShotResult.result === 'hit' ? '🎯 VURDU! 💥' : '❌ ISKALADI 💨'}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="text-center mb-4">
+                                    <h2 className="text-2xl font-bold text-blue-900 mb-2">
+                                        {isMyTurn ? (
+                                            <>
+                                                <Target className="w-8 h-8 inline mr-2" />
+                                                Senin Sıran!
+                                            </>
+                                        ) : (
+                                            <>
+                                                Sıra: {gameState.players[gameState.currentPlayer]?.name}
+                                            </>
+                                        )}
+                                    </h2>
+                                </div>
+
+                                {isMyTurn && !targetPlayer && (
+                                    <div className="text-center mb-4">
+                                        <p className="text-lg text-blue-700 mb-4">Kime ateş edeceksin?</p>
+                                        <div className="flex justify-center gap-4 flex-wrap">
+                                            {playerIds.map((pid) => {
+                                                if (pid === myPlayerId || gameState.players[pid]?.defeated) return null;
+                                                return (
+                                                    <button
+                                                        key={pid}
+                                                        onClick={() => setTargetPlayer(pid)}
+                                                        className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold"
+                                                    >
+                                                        {gameState.players[pid].name}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {targetPlayer && (
+                                    <div className="mb-4">
+                                        <p className="text-center text-lg text-red-600 mb-2">
+                                            Hedef: {gameState.players[targetPlayer]?.name} 🎯
+                                        </p>
+                                        {renderGrid(false, targetPlayer)}
+                                    </div>
+                                )}
+
+                                {!isMyTurn && (
+                                    <div className="text-center">
+                                        <p className="text-blue-700 mb-4">Tahtanı görebilirsin:</p>
+                                        {renderGrid(true)}
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-3 gap-2 mt-6">
+                                    {playerIds.map((pid) => {
+                                        const player = gameState.players[pid];
+                                        return (
+                                            <div
+                                                key={pid}
+                                                className={`p-3 rounded-lg text-center font-bold ${
+                                                    player.defeated
+                                                        ? 'bg-gray-300 text-gray-600'
+                                                        : pid === gameState.currentPlayer
+                                                        ? 'bg-yellow-400 text-yellow-900'
+                                                        : 'bg-blue-200 text-blue-900'
+                                                }`}
+                                            >
+                                                {player.name}
+                                                {player.defeated && ' ❌'}
+                                                {pid === gameState.currentPlayer && ' 👈'}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Finished Phase */}
+                        {gameState.phase === 'finished' && (
+                            <div className="bg-white/95 rounded-2xl p-6 shadow-2xl text-center">
+                                <Trophy className="w-24 h-24 text-yellow-400 mx-auto mb-4 animate-bounce" />
+                                <h2 className="text-4xl font-bold text-blue-900 mb-4">
+                                    🎉 {gameState.players[gameState.winner]?.name} Kazandı! 🎉
+                                </h2>
+                                <button
+                                    onClick={() => {
+                                        setScreen('home');
+                                        setRoomCode('');
+                                        setMyPlayerId(null);
+                                        setGameState(null);
+                                    }}
+                                    className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xl"
+                                >
+                                    Ana Menüye Dön
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AmiraLBattiOnline />);
+    </script>
+</body>
+</html>
