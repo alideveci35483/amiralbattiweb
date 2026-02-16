@@ -281,9 +281,9 @@
                 let content = '', bgColor = 'bg-blue-50';
                 if (isMyBoard && myBoard) {
                     const cell = myBoard[row]?.[col];
-                    if (cell !== null) {
+                    if (cell !== null && cell !== undefined && cell.shipIndex !== undefined) {
                         bgColor = 'bg-emerald-400';
-                        content = SHIPS[cell.shipIndex].emoji;
+                        content = SHIPS[cell.shipIndex]?.emoji || '🚢';
                     }
                 } else if (targetPlayerId && gameState) {
                     const shots = gameState.shots?.[myPlayerId] || {};
