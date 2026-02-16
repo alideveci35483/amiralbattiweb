@@ -3,24 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Amiral Battı - 2-3 Kişilik</title>
+    <title>Amiral Battı - Online</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
-        }
-    </style>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 </head>
 <body>
     <div id="root"></div>
-
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        // ⚠️ BU ALANI KENDİ FİREBASE BİLGİLERİNİZLE DEĞİŞTİRİN
+        const firebaseConfig = {
+  apiKey: "AIzaSyDAGg4FIf90vP9Ac20Ob44oehP1RPQi0eA",
+  authDomain: "amiral-batti-68b2b.firebaseapp.com",
+  databaseURL: "https://amiral-batti-68b2b-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "amiral-batti-68b2b",
+  storageBucket: "amiral-batti-68b2b.firebasestorage.app",
+  messagingSenderId: "901776562585",
+  appId: "1:901776562585:web:a878a398edb358ba019b08"
+};
+
+        let database;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            database = firebase.database();
+        } catch (error) {
+            console.error("Firebase error:", error);
+        }
+
+        const { useState, useEffect, useRef } = React;
 
         const Anchor = ({ className }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
@@ -40,7 +53,13 @@
             </svg>
         );
 
-        const AmiraLBatti = () => {
+        const Users = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+        );
+
+        const Game = () => {
             const GRID_SIZE = 10;
             const SHIPS = [
                 { name: 'Zırhlı', size: 5, emoji: '🚢' },
@@ -50,216 +69,206 @@
                 { name: 'Devriye', size: 2, emoji: '⛵' }
             ];
 
-            const [players, setPlayers] = useState(['', '', '']);
+            const [screen, setScreen] = useState('home');
+            const [roomCode, setRoomCode] = useState('');
+            const [playerName, setPlayerName] = useState('');
+            const [myPlayerId, setMyPlayerId] = useState(null);
+            const [inputRoomCode, setInputRoomCode] = useState('');
             const [maxPlayers, setMaxPlayers] = useState(3);
-            const [gamePhase, setGamePhase] = useState('playerCount');
-            const [currentPlayer, setCurrentPlayer] = useState(0);
+            const [gameState, setGameState] = useState(null);
+            const [myBoard, setMyBoard] = useState(null);
             const [currentShipIndex, setCurrentShipIndex] = useState(0);
             const [shipOrientation, setShipOrientation] = useState('horizontal');
-            const [boards, setBoards] = useState([]);
-            const [shots, setShots] = useState([]);
-            const [hoveredCell, setHoveredCell] = useState(null);
-            const [winner, setWinner] = useState(null);
             const [targetPlayer, setTargetPlayer] = useState(null);
-            const [showBoard, setShowBoard] = useState(true);
             const [lastShotResult, setLastShotResult] = useState(null);
+            const gameRef = useRef(null);
+
+            const generateRoomCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            const createRoom = async () => {
+                if (!playerName.trim()) { alert('Lütfen isminizi girin!'); return; }
+                const code = generateRoomCode();
+                const playerId = 'p1';
+                const initialGameState = {
+                    roomCode: code,
+                    maxPlayers: maxPlayers,
+                    players: { p1: { name: playerName, ready: false, board: null } },
+                    phase: 'lobby',
+                    currentPlayer: null,
+                    winner: null,
+                    createdAt: Date.now()
+                };
+                try {
+                    await database.ref('games/' + code).set(initialGameState);
+                    setRoomCode(code);
+                    setMyPlayerId(playerId);
+                    setScreen('lobby');
+                } catch (error) {
+                    alert('Oda oluşturulamadı: ' + error.message);
+                }
+            };
+
+            const joinRoom = async () => {
+                if (!playerName.trim()) { alert('Lütfen isminizi girin!'); return; }
+                if (!inputRoomCode.trim()) { alert('Lütfen oda kodunu girin!'); return; }
+                const code = inputRoomCode.toUpperCase();
+                try {
+                    const snapshot = await database.ref('games/' + code).once('value');
+                    const game = snapshot.val();
+                    if (!game) { alert('Bu kodla bir oda bulunamadı!'); return; }
+                    const playerCount = Object.keys(game.players || {}).length;
+                    const max = game.maxPlayers || 3;
+                    if (playerCount >= max) { alert(`Bu oda dolu! (${max}/${max})`); return; }
+                    const playerId = 'p' + (playerCount + 1);
+                    await database.ref('games/' + code + '/players/' + playerId).set({ name: playerName, ready: false, board: null });
+                    setRoomCode(code);
+                    setMyPlayerId(playerId);
+                    setScreen('lobby');
+                } catch (error) {
+                    alert('Odaya katılınamadı: ' + error.message);
+                }
+            };
 
             useEffect(() => {
-                if (players.length > 0) {
-                    const initialBoards = players.map(() => 
-                        Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null))
-                    );
-                    const initialShots = players.map(() => 
-                        Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null))
-                    );
-                    setBoards(initialBoards);
-                    setShots(initialShots);
+                if (!roomCode) return;
+                gameRef.current = database.ref('games/' + roomCode);
+                const listener = gameRef.current.on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setGameState(data);
+                        if (myPlayerId && data.players[myPlayerId]?.board) {
+                            setMyBoard(data.players[myPlayerId].board);
+                        }
+                    } else {
+                        setScreen('home');
+                        setRoomCode('');
+                        alert('Oda kapatıldı!');
+                    }
+                });
+                return () => { if (gameRef.current) gameRef.current.off('value', listener); };
+            }, [roomCode, myPlayerId]);
+
+            useEffect(() => {
+                if (!gameState || gameState.phase !== 'lobby') return;
+                const players = Object.values(gameState.players || {});
+                const max = gameState.maxPlayers || 3;
+                if (players.length === max && players.every(p => p.ready)) {
+                    database.ref('games/' + roomCode).update({ phase: 'playing', currentPlayer: 'p1' });
                 }
-            }, [players]);
+            }, [gameState, roomCode]);
 
             const canPlaceShip = (board, row, col, size, orientation) => {
                 if (orientation === 'horizontal') {
                     if (col + size > GRID_SIZE) return false;
-                    for (let i = 0; i < size; i++) {
-                        if (board[row][col + i] !== null) return false;
-                    }
+                    for (let i = 0; i < size; i++) if (board[row][col + i] !== null) return false;
                 } else {
                     if (row + size > GRID_SIZE) return false;
-                    for (let i = 0; i < size; i++) {
-                        if (board[row + i][col] !== null) return false;
-                    }
+                    for (let i = 0; i < size; i++) if (board[row + i][col] !== null) return false;
                 }
                 return true;
             };
 
             const placeShip = (row, col) => {
-                if (gamePhase !== 'setup') return;
-                const newBoards = [...boards];
-                const board = newBoards[currentPlayer];
+                if (gameState?.phase !== 'lobby' || gameState?.players[myPlayerId]?.ready) return;
+                const board = myBoard || Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
                 const ship = SHIPS[currentShipIndex];
                 if (!canPlaceShip(board, row, col, ship.size, shipOrientation)) return;
-
                 if (shipOrientation === 'horizontal') {
-                    for (let i = 0; i < ship.size; i++) {
-                        board[row][col + i] = { shipIndex: currentShipIndex, partIndex: i };
-                    }
+                    for (let i = 0; i < ship.size; i++) board[row][col + i] = { shipIndex: currentShipIndex, partIndex: i };
                 } else {
-                    for (let i = 0; i < ship.size; i++) {
-                        board[row + i][col] = { shipIndex: currentShipIndex, partIndex: i };
-                    }
+                    for (let i = 0; i < ship.size; i++) board[row + i][col] = { shipIndex: currentShipIndex, partIndex: i };
                 }
+                setMyBoard(board);
+                if (currentShipIndex < SHIPS.length - 1) setCurrentShipIndex(currentShipIndex + 1);
+            };
 
-                setBoards(newBoards);
-                if (currentShipIndex < SHIPS.length - 1) {
-                    setCurrentShipIndex(currentShipIndex + 1);
-                } else if (currentPlayer < players.length - 1) {
-                    setCurrentPlayer(currentPlayer + 1);
-                    setCurrentShipIndex(0);
-                } else {
-                    setGamePhase('playing');
-                    setCurrentPlayer(0);
+            const markReady = async () => {
+                if (currentShipIndex < SHIPS.length - 1) { alert('Lütfen önce tüm gemileri yerleştirin!'); return; }
+                try {
+                    await database.ref('games/' + roomCode + '/players/' + myPlayerId).update({ ready: true, board: myBoard });
+                } catch (error) {
+                    alert('Hazır durumuna geçilemedi: ' + error.message);
                 }
             };
 
-            const autoPlaceShips = (playerIndex) => {
-                const newBoards = [...boards];
+            const autoPlaceShips = () => {
                 const board = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
-                
                 for (let shipIdx = 0; shipIdx < SHIPS.length; shipIdx++) {
                     const ship = SHIPS[shipIdx];
-                    let placed = false;
-                    let attempts = 0;
-                    
+                    let placed = false, attempts = 0;
                     while (!placed && attempts < 100) {
                         const orientation = Math.random() > 0.5 ? 'horizontal' : 'vertical';
                         const row = Math.floor(Math.random() * GRID_SIZE);
                         const col = Math.floor(Math.random() * GRID_SIZE);
-                        
                         if (canPlaceShip(board, row, col, ship.size, orientation)) {
                             if (orientation === 'horizontal') {
-                                for (let i = 0; i < ship.size; i++) {
-                                    board[row][col + i] = { shipIndex: shipIdx, partIndex: i };
-                                }
+                                for (let i = 0; i < ship.size; i++) board[row][col + i] = { shipIndex: shipIdx, partIndex: i };
                             } else {
-                                for (let i = 0; i < ship.size; i++) {
-                                    board[row + i][col] = { shipIndex: shipIdx, partIndex: i };
-                                }
+                                for (let i = 0; i < ship.size; i++) board[row + i][col] = { shipIndex: shipIdx, partIndex: i };
                             }
                             placed = true;
                         }
                         attempts++;
                     }
                 }
-                
-                newBoards[playerIndex] = board;
-                setBoards(newBoards);
+                setMyBoard(board);
                 setCurrentShipIndex(SHIPS.length - 1);
             };
 
-            const autoPlaceAllPlayers = () => {
-                const newBoards = players.map(() => {
-                    const board = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
-                    
-                    for (let shipIdx = 0; shipIdx < SHIPS.length; shipIdx++) {
-                        const ship = SHIPS[shipIdx];
-                        let placed = false;
-                        let attempts = 0;
-                        
-                        while (!placed && attempts < 100) {
-                            const orientation = Math.random() > 0.5 ? 'horizontal' : 'vertical';
-                            const row = Math.floor(Math.random() * GRID_SIZE);
-                            const col = Math.floor(Math.random() * GRID_SIZE);
-                            
-                            if (canPlaceShip(board, row, col, ship.size, orientation)) {
-                                if (orientation === 'horizontal') {
-                                    for (let i = 0; i < ship.size; i++) {
-                                        board[row][col + i] = { shipIndex: shipIdx, partIndex: i };
-                                    }
-                                } else {
-                                    for (let i = 0; i < ship.size; i++) {
-                                        board[row + i][col] = { shipIndex: shipIdx, partIndex: i };
-                                    }
-                                }
-                                placed = true;
-                            }
-                            attempts++;
-                        }
-                    }
-                    return board;
-                });
-                
-                setBoards(newBoards);
-                setGamePhase('playing');
-                setCurrentPlayer(0);
-            };
-
-            const makeShot = (row, col) => {
-                if (gamePhase !== 'playing' || targetPlayer === null) return;
-                const newShots = [...shots];
-                if (newShots[currentPlayer][row][col] !== null) return;
-
-                const hit = boards[targetPlayer][row][col] !== null;
-                newShots[currentPlayer][row][col] = hit ? 'hit' : 'miss';
-                setShots(newShots);
+            const makeShot = async (row, col) => {
+                if (!gameState || gameState.phase !== 'playing') return;
+                if (gameState.currentPlayer !== myPlayerId) return;
+                if (!targetPlayer) return;
+                const targetBoard = gameState.players[targetPlayer]?.board;
+                if (!targetBoard) return;
+                const shots = gameState.shots || {};
+                const myShots = shots[myPlayerId] || {};
+                if (myShots[`${row}-${col}`]) return;
+                const hit = targetBoard[row][col] !== null;
+                await database.ref(`games/${roomCode}/shots/${myPlayerId}/${row}-${col}`).set(hit ? 'hit' : 'miss');
                 setLastShotResult({ result: hit ? 'hit' : 'miss', row, col });
 
-                const allShipsSunk = checkAllShipsSunk(targetPlayer);
-                if (allShipsSunk) {
-                    const remainingPlayers = players.filter((_, idx) => 
-                        idx === currentPlayer || !isPlayerDefeated(idx)
-                    );
-                    if (remainingPlayers.length === 1) {
-                        setWinner(currentPlayer);
-                        setGamePhase('finished');
+                const targetDefeated = checkPlayerDefeated(targetPlayer);
+                if (targetDefeated) {
+                    await database.ref(`games/${roomCode}/players/${targetPlayer}/defeated`).set(true);
+                    const playerIds = Object.keys(gameState.players);
+                    const alivePlayers = playerIds.filter(pid => pid === myPlayerId || !gameState.players[pid].defeated);
+                    if (alivePlayers.length === 1) {
+                        await database.ref(`games/${roomCode}`).update({ phase: 'finished', winner: myPlayerId });
                         return;
                     }
                 }
 
                 if (!hit) {
-                    setTimeout(() => {
-                        let nextPlayer = (currentPlayer + 1) % players.length;
-                        while (isPlayerDefeated(nextPlayer)) {
-                            nextPlayer = (nextPlayer + 1) % players.length;
+                    setTimeout(async () => {
+                        const playerIds = Object.keys(gameState.players);
+                        const currentIndex = playerIds.indexOf(myPlayerId);
+                        let nextIndex = (currentIndex + 1) % playerIds.length;
+                        while (gameState.players[playerIds[nextIndex]]?.defeated) {
+                            nextIndex = (nextIndex + 1) % playerIds.length;
                         }
-                        setCurrentPlayer(nextPlayer);
+                        await database.ref(`games/${roomCode}/currentPlayer`).set(playerIds[nextIndex]);
                         setTargetPlayer(null);
-                        setShowBoard(true);
                         setLastShotResult(null);
                     }, 2000);
                 } else {
                     setTimeout(() => {
                         setTargetPlayer(null);
-                        setShowBoard(true);
                         setLastShotResult(null);
                     }, 1500);
                 }
             };
 
-            const isPlayerDefeated = (playerIndex) => {
-                const board = boards[playerIndex];
-                if (!board) return false;
+            const checkPlayerDefeated = (playerId) => {
+                const board = gameState.players[playerId]?.board;
+                if (!board) return true;
+                const allShots = gameState.shots || {};
                 for (let i = 0; i < GRID_SIZE; i++) {
                     for (let j = 0; j < GRID_SIZE; j++) {
                         if (board[i][j] !== null) {
-                            const allHit = players.some((_, attackerIdx) => {
-                                if (attackerIdx === playerIndex) return false;
-                                return shots[attackerIdx]?.[i]?.[j] === 'hit';
-                            });
-                            if (!allHit) return false;
-                        }
-                    }
-                }
-                return true;
-            };
-
-            const checkAllShipsSunk = (playerIndex) => {
-                const board = boards[playerIndex];
-                for (let i = 0; i < GRID_SIZE; i++) {
-                    for (let j = 0; j < GRID_SIZE; j++) {
-                        if (board[i][j] !== null) {
-                            const isHit = shots.some((playerShots, attackerIdx) => {
-                                if (attackerIdx === playerIndex) return false;
-                                return playerShots[i][j] === 'hit';
+                            const isHit = Object.keys(allShots).some(shooterId => {
+                                if (shooterId === playerId) return false;
+                                return allShots[shooterId]?.[`${i}-${j}`] === 'hit';
                             });
                             if (!isHit) return false;
                         }
@@ -268,181 +277,177 @@
                 return true;
             };
 
-            const renderCell = (row, col, isPlayerBoard) => {
-                let content = '';
-                let bgColor = 'bg-blue-50';
-                
-                if (gamePhase === 'setup' && isPlayerBoard) {
-                    const cell = boards[currentPlayer]?.[row]?.[col];
+            const renderCell = (row, col, isMyBoard, targetPlayerId = null) => {
+                let content = '', bgColor = 'bg-blue-50';
+                if (isMyBoard && myBoard) {
+                    const cell = myBoard[row]?.[col];
                     if (cell !== null) {
                         bgColor = 'bg-emerald-400';
                         content = SHIPS[cell.shipIndex].emoji;
                     }
-                } else if (gamePhase === 'playing' && !isPlayerBoard && targetPlayer !== null) {
-                    const shot = shots[currentPlayer]?.[row]?.[col];
-                    if (shot === 'hit') {
-                        bgColor = 'bg-red-500';
-                        content = '💥';
-                    } else if (shot === 'miss') {
-                        bgColor = 'bg-blue-300';
-                        content = '💨';
-                    }
+                } else if (targetPlayerId && gameState) {
+                    const shots = gameState.shots?.[myPlayerId] || {};
+                    const shot = shots[`${row}-${col}`];
+                    if (shot === 'hit') { bgColor = 'bg-red-500'; content = '💥'; }
+                    else if (shot === 'miss') { bgColor = 'bg-blue-300'; content = '💨'; }
                 }
-
                 return (
-                    <div
-                        key={`${row}-${col}`}
-                        onClick={() => {
-                            if (gamePhase === 'setup' && isPlayerBoard) {
-                                placeShip(row, col);
-                            } else if (gamePhase === 'playing' && !isPlayerBoard && targetPlayer !== null) {
-                                makeShot(row, col);
-                            }
-                        }}
-                        className={`aspect-square border-2 border-blue-900/20 flex items-center justify-center text-lg md:text-xl transition-all cursor-pointer hover:border-blue-600 hover:scale-105 ${bgColor}`}
-                    >
+                    <div key={`${row}-${col}`} onClick={() => {
+                        if (isMyBoard && !gameState?.players[myPlayerId]?.ready) placeShip(row, col);
+                        else if (!isMyBoard && targetPlayerId && gameState?.currentPlayer === myPlayerId) makeShot(row, col);
+                    }} className={`aspect-square border-2 border-blue-900/20 flex items-center justify-center text-lg transition-all cursor-pointer hover:border-blue-600 ${bgColor}`}>
                         {content}
                     </div>
                 );
             };
 
-            const renderGrid = (isPlayerBoard = false) => {
+            const renderGrid = (isMyBoard, targetPlayerId = null) => (
+                <div className="grid grid-cols-10 gap-0.5 bg-blue-900/10 p-2 rounded-lg shadow-xl max-w-md mx-auto">
+                    {Array(GRID_SIZE).fill(null).map((_, row) => 
+                        Array(GRID_SIZE).fill(null).map((_, col) => renderCell(row, col, isMyBoard, targetPlayerId))
+                    )}
+                </div>
+            );
+
+            if (screen === 'home') {
                 return (
-                    <div className="grid grid-cols-10 gap-0.5 bg-blue-900/10 p-2 rounded-lg shadow-xl max-w-md mx-auto">
-                        {Array(GRID_SIZE).fill(null).map((_, row) => 
-                            Array(GRID_SIZE).fill(null).map((_, col) => renderCell(row, col, isPlayerBoard))
-                        )}
+                    <div className="min-h-screen bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-600 p-4 flex items-center justify-center relative">
+                        <div className="bg-white/95 rounded-2xl p-8 shadow-2xl max-w-md w-full">
+                            <div className="text-center mb-8">
+                                <Anchor className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                                <h1 className="text-4xl font-bold text-blue-900 mb-2">Amiral Battı</h1>
+                                <p className="text-lg text-blue-700">Online Multiplayer</p>
+                            </div>
+                            <div className="space-y-4 mb-6">
+                                <input type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="İsminizi girin" className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg" maxLength={15} />
+                                <div className="bg-blue-50 rounded-lg p-4">
+                                    <label className="block text-sm font-bold text-blue-900 mb-3">Kaç Kişi Oynayacak?</label>
+                                    <div className="flex gap-3">
+                                        <button onClick={() => setMaxPlayers(2)} className={`flex-1 px-4 py-3 rounded-lg font-bold ${maxPlayers === 2 ? 'bg-blue-600 text-white' : 'bg-white text-blue-900 border-2 border-blue-300'}`}>2 Kişi</button>
+                                        <button onClick={() => setMaxPlayers(3)} className={`flex-1 px-4 py-3 rounded-lg font-bold ${maxPlayers === 3 ? 'bg-blue-600 text-white' : 'bg-white text-blue-900 border-2 border-blue-300'}`}>3 Kişi</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <button onClick={createRoom} className="w-full px-6 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xl">🎮 Yeni Oda Oluştur ({maxPlayers} Kişilik)</button>
+                                <div className="relative"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300"></div></div><div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-gray-500">veya</span></div></div>
+                                <input type="text" value={inputRoomCode} onChange={(e) => setInputRoomCode(e.target.value.toUpperCase())} placeholder="Oda kodu (ABC123)" className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg uppercase" maxLength={6} />
+                                <button onClick={joinRoom} className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xl">🚪 Odaya Katıl</button>
+                            </div>
+                        </div>
+                        <div className="fixed bottom-4 right-4 bg-white/90 px-4 py-2 rounded-lg shadow-lg"><p className="text-sm text-gray-700"><span className="font-semibold">Designed by</span> Ali Deveci</p></div>
                     </div>
                 );
-            };
-
-            if (boards.length === 0) {
-                return <div className="min-h-screen flex items-center justify-center">Yükleniyor...</div>;
             }
 
+            if (!gameState) return <div className="min-h-screen flex items-center justify-center">Yükleniyor...</div>;
+
+            const playerIds = Object.keys(gameState.players || {});
+            const myPlayerData = gameState.players[myPlayerId];
+            const isMyTurn = gameState.currentPlayer === myPlayerId;
+
             return (
-                <div className="min-h-screen bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-600 p-4 md:p-8">
+                <div className="min-h-screen bg-gradient-to-br from-sky-400 via-blue-500 to-indigo-600 p-4">
                     <div className="max-w-4xl mx-auto">
-                        <div className="text-center mb-8">
+                        <div className="text-center mb-6">
                             <div className="flex items-center justify-center gap-3 mb-4">
-                                <Anchor className="w-12 h-12 text-yellow-300 animate-bounce" />
-                                <h1 className="text-4xl md:text-6xl font-bold text-white drop-shadow-lg">Amiral Battı</h1>
-                                <Anchor className="w-12 h-12 text-yellow-300 animate-bounce" />
+                                <Anchor className="w-12 h-12 text-yellow-300" />
+                                <h1 className="text-4xl font-bold text-white">Amiral Battı</h1>
+                                <Anchor className="w-12 h-12 text-yellow-300" />
                             </div>
-                            <p className="text-xl text-white/90 font-semibold">2-3 Kişilik Deniz Savaşı</p>
+                            <div className="bg-white/90 px-6 py-2 rounded-full inline-block"><p className="text-lg font-bold text-blue-900">Oda: {roomCode}</p></div>
                         </div>
 
-                        <div className="bg-white/95 rounded-2xl p-6 shadow-2xl mb-6">
-                            {gamePhase === 'playerCount' && (
-                                <div className="text-center">
-                                    <h2 className="text-3xl font-bold text-blue-900 mb-6">Kaç Kişi Oynayacaksınız?</h2>
-                                    <div className="flex justify-center gap-6 mb-8">
-                                        <button onClick={() => { setMaxPlayers(2); setPlayers(['', '']); }} className="px-12 py-8 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-3xl">2 Kişi</button>
-                                        <button onClick={() => { setMaxPlayers(3); setPlayers(['', '', '']); }} className="px-12 py-8 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-3xl">3 Kişi</button>
-                                    </div>
-                                    <button onClick={() => setGamePhase('nameInput')} className="px-8 py-4 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-bold text-xl">Devam →</button>
+                        {gameState.phase === 'lobby' && (
+                            <div className="bg-white/95 rounded-2xl p-6 shadow-2xl">
+                                <div className="text-center mb-6">
+                                    <Users className="w-16 h-16 text-blue-600 mx-auto mb-4" />
+                                    <h2 className="text-2xl font-bold text-blue-900 mb-2">Oyuncular ({playerIds.length}/{gameState.maxPlayers || 3})</h2>
                                 </div>
-                            )}
-
-                            {gamePhase === 'nameInput' && (
-                                <div className="text-center">
-                                    <h2 className="text-3xl font-bold text-blue-900 mb-6">Oyuncuların İsimlerini Girin</h2>
-                                    <div className="space-y-4 max-w-md mx-auto mb-6">
-                                        {players.map((name, idx) => (
-                                            <div key={idx} className="flex items-center gap-3">
-                                                <label className="text-lg font-bold text-blue-900 w-24">Oyuncu {idx + 1}:</label>
-                                                <input type="text" value={name} onChange={(e) => { const newPlayers = [...players]; newPlayers[idx] = e.target.value; setPlayers(newPlayers); }} placeholder={`Oyuncu ${idx + 1}'in adı`} className="flex-1 px-4 py-3 border-2 border-blue-300 rounded-lg text-lg" maxLength={15} />
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <button onClick={() => { if (players.every(n => n.trim() !== '')) setGamePhase('setup'); else alert('Lütfen tüm oyuncuların isimlerini girin!'); }} disabled={!players.every(n => n.trim() !== '')} className={`px-8 py-4 rounded-lg font-bold text-xl ${players.every(n => n.trim() !== '') ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-gray-300 text-gray-500'}`}>Oyuna Başla! 🚀</button>
-                                </div>
-                            )}
-
-                            {gamePhase === 'setup' && (
-                                <>
-                                    <div className="text-center mb-4">
-                                        <h2 className="text-2xl font-bold text-blue-900 mb-2">{players[currentPlayer]} - Gemi Yerleştirme</h2>
-                                        <p className="text-lg text-blue-700">{SHIPS[currentShipIndex].emoji} {SHIPS[currentShipIndex].name} ({SHIPS[currentShipIndex].size} birim)</p>
-                                    </div>
-                                    <div className="flex justify-center gap-4 mb-6">
-                                        <button onClick={() => setShipOrientation('horizontal')} className={`px-6 py-3 rounded-lg font-bold ${shipOrientation === 'horizontal' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>Yatay ↔️</button>
-                                        <button onClick={() => setShipOrientation('vertical')} className={`px-6 py-3 rounded-lg font-bold ${shipOrientation === 'vertical' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>Dikey ↕️</button>
-                                    </div>
-                                    <div className="flex justify-center gap-3 mb-6 flex-wrap">
-                                        <button onClick={() => autoPlaceShips(currentPlayer)} className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold">🎲 Otomatik</button>
-                                        <button onClick={() => { const newBoards = [...boards]; newBoards[currentPlayer] = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null)); setBoards(newBoards); setCurrentShipIndex(0); }} className="px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold">🔄 Sıfırla</button>
-                                        {currentPlayer === 0 && currentShipIndex === 0 && (
-                                            <button onClick={autoPlaceAllPlayers} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold">⚡ Herkesi Otomatik</button>
-                                        )}
-                                    </div>
-                                    {renderGrid(true)}
-                                </>
-                            )}
-
-                            {gamePhase === 'playing' && (
-                                <>
-                                    {lastShotResult && (
-                                        <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-                                            <div className={`text-6xl md:text-8xl font-bold px-8 py-6 rounded-3xl shadow-2xl animate-bounce ${lastShotResult.result === 'hit' ? 'bg-red-600 text-white' : 'bg-blue-400 text-white'}`}>
-                                                {lastShotResult.result === 'hit' ? '🎯 VURDU! 💥' : '❌ ISKALADI 💨'}
-                                            </div>
+                                <div className={`grid ${(gameState.maxPlayers || 3) === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-4 mb-6`}>
+                                    {playerIds.map(pid => (
+                                        <div key={pid} className={`p-4 rounded-lg border-2 ${gameState.players[pid].ready ? 'bg-green-100 border-green-500' : 'bg-gray-100 border-gray-300'}`}>
+                                            <p className="font-bold text-lg text-center">{gameState.players[pid].name}{pid === myPlayerId && ' (Sen)'}</p>
+                                            <p className="text-center text-sm mt-1">{gameState.players[pid].ready ? '✅ Hazır' : '⏳ Bekliyor'}</p>
                                         </div>
-                                    )}
-                                    <div className="text-center mb-4">
-                                        <h2 className="text-2xl font-bold text-blue-900 mb-2 flex items-center justify-center gap-2">
-                                            <Target className="w-8 h-8" />{players[currentPlayer]}'in Sırası
-                                        </h2>
-                                        {targetPlayer === null ? (
-                                            <>
-                                                <p className="text-lg text-blue-700 mb-4">Kime ateş edeceksin?</p>
-                                                <div className="flex justify-center gap-4 flex-wrap">
-                                                    {players.map((player, idx) => {
-                                                        if (idx === currentPlayer || isPlayerDefeated(idx)) return null;
-                                                        return <button key={idx} onClick={() => { setTargetPlayer(idx); setShowBoard(true); }} className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold">{player}</button>;
-                                                    })}
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <p className="text-lg text-red-600 mb-2">Hedef: {players[targetPlayer]} 🎯</p>
-                                                <p className="text-sm text-green-600 font-bold mb-4">💡 Vurursan tekrar atış hakkı kazanırsın!</p>
-                                                {renderGrid(false)}
-                                            </>
-                                        )}
-                                    </div>
-                                    <div className={`grid ${maxPlayers === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-6`}>
-                                        {players.map((player, idx) => (
-                                            <div key={idx} className={`p-3 rounded-lg text-center font-bold ${isPlayerDefeated(idx) ? 'bg-gray-300 text-gray-600' : idx === currentPlayer ? 'bg-yellow-400 text-yellow-900' : 'bg-blue-200 text-blue-900'}`}>
-                                                {player}{isPlayerDefeated(idx) && ' ❌'}{idx === currentPlayer && ' 👈'}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-
-                            {gamePhase === 'finished' && (
-                                <div className="text-center">
-                                    <Trophy className="w-24 h-24 text-yellow-400 mx-auto mb-4 animate-bounce" />
-                                    <h2 className="text-4xl font-bold text-blue-900 mb-4">🎉 {players[winner]} Kazandı! 🎉</h2>
-                                    <div className="flex justify-center gap-4 flex-wrap">
-                                        <button onClick={() => { setGamePhase('setup'); setCurrentPlayer(0); setCurrentShipIndex(0); setTargetPlayer(null); const initialBoards = players.map(() => Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null))); const initialShots = players.map(() => Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null))); setBoards(initialBoards); setShots(initialShots); }} className="px-8 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xl">Yeni Oyun 🔄</button>
-                                        <button onClick={() => { setPlayers(['', '', '']); setGamePhase('playerCount'); setCurrentPlayer(0); setCurrentShipIndex(0); setTargetPlayer(null); }} className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xl">İsimleri Değiştir ✏️</button>
-                                    </div>
+                                    ))}
+                                    {[...Array((gameState.maxPlayers || 3) - playerIds.length)].map((_, i) => (
+                                        <div key={`empty-${i}`} className="p-4 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50"><p className="text-center text-gray-400 font-bold">Boş</p></div>
+                                    ))}
                                 </div>
-                            )}
-                        </div>
+                                {!myPlayerData?.ready && (
+                                    <>
+                                        <div className="text-center mb-4">
+                                            <h3 className="text-xl font-bold text-blue-900 mb-2">Gemilerini Yerleştir</h3>
+                                            <p className="text-blue-700">{currentShipIndex < SHIPS.length ? `${SHIPS[currentShipIndex].emoji} ${SHIPS[currentShipIndex].name} (${SHIPS[currentShipIndex].size})` : 'Tamamlandı!'}</p>
+                                        </div>
+                                        <div className="flex justify-center gap-3 mb-4">
+                                            <button onClick={() => setShipOrientation('horizontal')} className={`px-4 py-2 rounded-lg font-bold ${shipOrientation === 'horizontal' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>Yatay ↔️</button>
+                                            <button onClick={() => setShipOrientation('vertical')} className={`px-4 py-2 rounded-lg font-bold ${shipOrientation === 'vertical' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>Dikey ↕️</button>
+                                            <button onClick={autoPlaceShips} className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold">🎲 Otomatik</button>
+                                        </div>
+                                        {renderGrid(true)}
+                                        <div className="text-center mt-4">
+                                            <button onClick={markReady} className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xl">✅ Hazırım!</button>
+                                        </div>
+                                    </>
+                                )}
+                                {myPlayerData?.ready && (
+                                    <div className="text-center"><p className="text-2xl font-bold text-green-600 mb-4">✅ Hazırsın!</p><p className="text-blue-700">Diğer oyuncular bekleniyor...</p>{renderGrid(true)}</div>
+                                )}
+                            </div>
+                        )}
+
+                        {gameState.phase === 'playing' && (
+                            <div className="bg-white/95 rounded-2xl p-6 shadow-2xl">
+                                {lastShotResult && (
+                                    <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+                                        <div className={`text-6xl font-bold px-8 py-6 rounded-3xl shadow-2xl animate-bounce ${lastShotResult.result === 'hit' ? 'bg-red-600 text-white' : 'bg-blue-400 text-white'}`}>
+                                            {lastShotResult.result === 'hit' ? '🎯 VURDU! 💥' : '❌ ISKALADI 💨'}
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="text-center mb-4">
+                                    <h2 className="text-2xl font-bold text-blue-900 mb-2">{isMyTurn ? <><Target className="w-8 h-8 inline mr-2" />Senin Sıran!</> : `Sıra: ${gameState.players[gameState.currentPlayer]?.name}`}</h2>
+                                </div>
+                                {isMyTurn && !targetPlayer && (
+                                    <div className="text-center mb-4">
+                                        <p className="text-lg text-blue-700 mb-4">Kime ateş edeceksin?</p>
+                                        <div className="flex justify-center gap-4 flex-wrap">
+                                            {playerIds.map(pid => {
+                                                if (pid === myPlayerId || gameState.players[pid]?.defeated) return null;
+                                                return <button key={pid} onClick={() => setTargetPlayer(pid)} className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold">{gameState.players[pid].name}</button>;
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+                                {targetPlayer && (<div className="mb-4"><p className="text-center text-lg text-red-600 mb-2">Hedef: {gameState.players[targetPlayer]?.name} 🎯</p>{renderGrid(false, targetPlayer)}</div>)}
+                                {!isMyTurn && (<div className="text-center"><p className="text-blue-700 mb-4">Tahtanı görebilirsin:</p>{renderGrid(true)}</div>)}
+                                <div className={`grid ${(gameState.maxPlayers || 3) === 3 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 mt-6`}>
+                                    {playerIds.map(pid => (
+                                        <div key={pid} className={`p-3 rounded-lg text-center font-bold ${gameState.players[pid].defeated ? 'bg-gray-300 text-gray-600' : pid === gameState.currentPlayer ? 'bg-yellow-400 text-yellow-900' : 'bg-blue-200 text-blue-900'}`}>
+                                            {gameState.players[pid].name}{gameState.players[pid].defeated && ' ❌'}{pid === gameState.currentPlayer && ' 👈'}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {gameState.phase === 'finished' && (
+                            <div className="bg-white/95 rounded-2xl p-6 shadow-2xl text-center">
+                                <Trophy className="w-24 h-24 text-yellow-400 mx-auto mb-4 animate-bounce" />
+                                <h2 className="text-4xl font-bold text-blue-900 mb-4">🎉 {gameState.players[gameState.winner]?.name} Kazandı! 🎉</h2>
+                                <button onClick={() => { setScreen('home'); setRoomCode(''); setMyPlayerId(null); }} className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xl">Ana Menüye Dön</button>
+                            </div>
+                        )}
                     </div>
-                    
-                    <div className="fixed bottom-4 right-4 bg-white/90 px-4 py-2 rounded-lg shadow-lg z-50">
-                        <p className="text-sm text-gray-700"><span className="font-semibold">Designed by</span> Ali Deveci</p>
-                    </div>
+                    <div className="fixed bottom-4 right-4 bg-white/90 px-4 py-2 rounded-lg shadow-lg"><p className="text-sm text-gray-700"><span className="font-semibold">Designed by</span> Ali Deveci</p></div>
                 </div>
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<AmiraLBatti />);
+        root.render(<Game />);
     </script>
 </body>
 </html>
