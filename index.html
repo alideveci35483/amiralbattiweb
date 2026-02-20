@@ -152,8 +152,22 @@
                 if (!gameState || gameState.phase !== 'lobby') return;
                 const players = Object.values(gameState.players || {});
                 const max = gameState.maxPlayers || 3;
+                const readyCount = players.filter(p => p.ready).length;
+                
+                console.log('Lobby Check:', { 
+                    totalPlayers: players.length, 
+                    maxPlayers: max, 
+                    readyPlayers: readyCount,
+                    allReady: players.every(p => p.ready)
+                });
+                
+                // Auto-start when all players are ready
                 if (players.length === max && players.every(p => p.ready)) {
-                    database.ref('games/' + roomCode).update({ phase: 'playing', currentPlayer: 'p1' });
+                    console.log('Starting game!');
+                    database.ref('games/' + roomCode).update({ 
+                        phase: 'playing', 
+                        currentPlayer: 'p1' 
+                    }).catch(err => console.error('Failed to start game:', err));
                 }
             }, [gameState, roomCode]);
 
@@ -224,7 +238,11 @@
                 const shots = gameState.shots || {};
                 const myShots = shots[myPlayerId] || {};
                 if (myShots[`${row}-${col}`]) return;
-                const hit = targetBoard[row][col] !== null;
+                
+                // FIX: Proper hit detection with safety checks
+                const targetCell = targetBoard[row]?.[col];
+                const hit = targetCell !== null && targetCell !== undefined && typeof targetCell === 'object';
+                
                 await database.ref(`games/${roomCode}/shots/${myPlayerId}/${row}-${col}`).set(hit ? 'hit' : 'miss');
                 setLastShotResult({ result: hit ? 'hit' : 'miss', row, col });
 
