@@ -81,6 +81,7 @@
             const [shipOrientation, setShipOrientation] = useState('horizontal');
             const [targetPlayer, setTargetPlayer] = useState(null);
             const [lastShotResult, setLastShotResult] = useState(null);
+            const [shotInProgress, setShotInProgress] = useState(false);
             const gameRef = useRef(null);
 
             const generateRoomCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -233,66 +234,87 @@
                 if (!gameState || gameState.phase !== 'playing') return;
                 if (gameState.currentPlayer !== myPlayerId) return;
                 if (!targetPlayer) return;
+                if (shotInProgress) return; // Çift atış koruması
+
                 const targetBoard = gameState.players[targetPlayer]?.board;
                 if (!targetBoard) return;
                 const shots = gameState.shots || {};
                 const myShots = shots[myPlayerId] || {};
-                if (myShots[`${row}-${col}`]) return;
-                
-                // FIX: Proper hit detection with safety checks
+                if (myShots[`${row}-${col}`]) return; // Aynı kareye tekrar atış koruması
+
+                setShotInProgress(true); // Atış başladı, kilitle
+
                 const targetCell = targetBoard[row]?.[col];
                 const hit = targetCell !== null && targetCell !== undefined && typeof targetCell === 'object';
-                
+
+                // Atışı Firebase'e kaydet
                 await database.ref(`games/${roomCode}/shots/${myPlayerId}/${row}-${col}`).set(hit ? 'hit' : 'miss');
                 setLastShotResult({ result: hit ? 'hit' : 'miss', row, col });
 
-                const targetDefeated = checkPlayerDefeated(targetPlayer);
+                // Gemi batırma tespiti: mevcut gameState.shots + yeni atışı birlikte hesapla
+                const targetDefeated = checkPlayerDefeatedWithShot(targetPlayer, myPlayerId, `${row}-${col}`, hit);
                 if (targetDefeated) {
                     await database.ref(`games/${roomCode}/players/${targetPlayer}/defeated`).set(true);
-                    const playerIds = Object.keys(gameState.players);
-                    const alivePlayers = playerIds.filter(pid => pid === myPlayerId || !gameState.players[pid].defeated);
+                    const allPlayerIds = Object.keys(gameState.players);
+                    const alivePlayers = allPlayerIds.filter(pid => {
+                        if (pid === targetPlayer) return false; // yeni batırılan
+                        return !gameState.players[pid].defeated;
+                    });
                     if (alivePlayers.length === 1) {
                         await database.ref(`games/${roomCode}`).update({ phase: 'finished', winner: myPlayerId });
+                        setShotInProgress(false);
                         return;
                     }
                 }
 
                 if (!hit) {
-                    setTimeout(async () => {
-                        const playerIds = Object.keys(gameState.players);
-                        const currentIndex = playerIds.indexOf(myPlayerId);
-                        let nextIndex = (currentIndex + 1) % playerIds.length;
-                        while (gameState.players[playerIds[nextIndex]]?.defeated) {
-                            nextIndex = (nextIndex + 1) % playerIds.length;
-                        }
-                        await database.ref(`games/${roomCode}/currentPlayer`).set(playerIds[nextIndex]);
-                        setTargetPlayer(null);
-                        setLastShotResult(null);
-                    }, 2000);
-                } else {
+                    // MISS: Firebase'i HEMEN güncelle - sıra geçsin, bekleme yok
+                    const allPlayerIds = Object.keys(gameState.players);
+                    const currentIndex = allPlayerIds.indexOf(myPlayerId);
+                    let nextIndex = (currentIndex + 1) % allPlayerIds.length;
+                    while (gameState.players[allPlayerIds[nextIndex]]?.defeated || allPlayerIds[nextIndex] === targetPlayer && targetDefeated) {
+                        nextIndex = (nextIndex + 1) % allPlayerIds.length;
+                    }
+                    await database.ref(`games/${roomCode}/currentPlayer`).set(allPlayerIds[nextIndex]);
+                    
+                    // Sonuç göster, sonra UI temizle
                     setTimeout(() => {
                         setTargetPlayer(null);
                         setLastShotResult(null);
+                        setShotInProgress(false);
+                    }, 2000);
+                } else {
+                    // HIT: Aynı oyuncu oynamaya devam eder, hedef sıfırla
+                    setTimeout(() => {
+                        setTargetPlayer(null);
+                        setLastShotResult(null);
+                        setShotInProgress(false);
                     }, 1500);
                 }
             };
 
-            const checkPlayerDefeated = (playerId) => {
+            // Mevcut gameState'e + yeni atışı dahil ederek gemi batırma kontrolü
+            const checkPlayerDefeatedWithShot = (playerId, shooterId, shotKey, shotIsHit) => {
                 const board = gameState.players[playerId]?.board;
                 if (!board) return true;
                 const allShots = gameState.shots || {};
                 for (let i = 0; i < GRID_SIZE; i++) {
                     for (let j = 0; j < GRID_SIZE; j++) {
-                        if (board[i][j] !== null) {
-                            const isHit = Object.keys(allShots).some(shooterId => {
-                                if (shooterId === playerId) return false;
-                                return allShots[shooterId]?.[`${i}-${j}`] === 'hit';
-                            });
+                        if (board[i][j] !== null && typeof board[i][j] === 'object') {
+                            const key = `${i}-${j}`;
+                            const isHit = Object.keys(allShots).some(sid => {
+                                if (sid === playerId) return false;
+                                return allShots[sid]?.[key] === 'hit';
+                            }) || (key === shotKey && shooterId !== playerId && shotIsHit);
                             if (!isHit) return false;
                         }
                     }
                 }
                 return true;
+            };
+
+            const checkPlayerDefeated = (playerId) => {
+                return checkPlayerDefeatedWithShot(playerId, '', '', false);
             };
 
             const renderCell = (row, col, isMyBoard, targetPlayerId = null) => {
@@ -312,7 +334,7 @@
                 return (
                     <div key={`${row}-${col}`} onClick={() => {
                         if (isMyBoard && !gameState?.players[myPlayerId]?.ready) placeShip(row, col);
-                        else if (!isMyBoard && targetPlayerId && gameState?.currentPlayer === myPlayerId) makeShot(row, col);
+                        else if (!isMyBoard && targetPlayerId && gameState?.currentPlayer === myPlayerId && !shotInProgress) makeShot(row, col);
                     }} className={`aspect-square border-2 border-blue-900/20 flex items-center justify-center text-lg transition-all cursor-pointer hover:border-blue-600 ${bgColor}`}>
                         {content}
                     </div>
