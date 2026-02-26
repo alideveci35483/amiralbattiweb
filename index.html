@@ -61,7 +61,7 @@
 
         const Game = () => {
             const GRID_SIZE = 10;
-            const SHIPS = [
+            const SHIPS =[
                 { name: 'Zırhlı', size: 5, emoji: '🚢' },
                 { name: 'Kruvazör', size: 4, emoji: '⛴️' },
                 { name: 'Destroyer', size: 3, emoji: '🛥️' },
@@ -70,15 +70,15 @@
             ];
 
             const [screen, setScreen] = useState('home');
-            const [roomCode, setRoomCode] = useState('');
+            const[roomCode, setRoomCode] = useState('');
             const [playerName, setPlayerName] = useState('');
-            const [myPlayerId, setMyPlayerId] = useState(null);
-            const [inputRoomCode, setInputRoomCode] = useState('');
+            const[myPlayerId, setMyPlayerId] = useState(null);
+            const[inputRoomCode, setInputRoomCode] = useState('');
             const [maxPlayers, setMaxPlayers] = useState(3);
-            const [gameState, setGameState] = useState(null);
+            const[gameState, setGameState] = useState(null);
             const [myBoard, setMyBoard] = useState(null);
             const [currentShipIndex, setCurrentShipIndex] = useState(0);
-            const [shipOrientation, setShipOrientation] = useState('horizontal');
+            const[shipOrientation, setShipOrientation] = useState('horizontal');
             const [targetPlayer, setTargetPlayer] = useState(null);
             const [lastShotResult, setLastShotResult] = useState(null);
             const [shotInProgress, setShotInProgress] = useState(false);
@@ -153,18 +153,9 @@
                 if (!gameState || gameState.phase !== 'lobby') return;
                 const players = Object.values(gameState.players || {});
                 const max = gameState.maxPlayers || 3;
-                const readyCount = players.filter(p => p.ready).length;
-                
-                console.log('Lobby Check:', { 
-                    totalPlayers: players.length, 
-                    maxPlayers: max, 
-                    readyPlayers: readyCount,
-                    allReady: players.every(p => p.ready)
-                });
                 
                 // Auto-start when all players are ready
                 if (players.length === max && players.every(p => p.ready)) {
-                    console.log('Starting game!');
                     database.ref('games/' + roomCode).update({ 
                         phase: 'playing', 
                         currentPlayer: 'p1' 
@@ -230,6 +221,32 @@
                 setCurrentShipIndex(SHIPS.length - 1);
             };
 
+            // Mevcut gameState'e + yeni atışı dahil ederek gemi batırma kontrolü
+            // DÜZELTME: Firebase boş satırları sildiği için board[i]?.[j] kontrolü eklendi
+            const checkPlayerDefeatedWithShot = (playerId, shooterId, shotKey, shotIsHit) => {
+                const board = gameState.players[playerId]?.board;
+                if (!board) return true;
+                const allShots = gameState.shots || {};
+                for (let i = 0; i < GRID_SIZE; i++) {
+                    for (let j = 0; j < GRID_SIZE; j++) {
+                        const cell = board[i]?.[j]; // ?. kullanarak undefined hatasını önledik
+                        if (cell !== null && cell !== undefined && typeof cell === 'object') {
+                            const key = `${i}-${j}`;
+                            const isHit = Object.keys(allShots).some(sid => {
+                                if (sid === playerId) return false;
+                                return allShots[sid]?.[key] === 'hit';
+                            }) || (key === shotKey && shooterId !== playerId && shotIsHit);
+                            if (!isHit) return false;
+                        }
+                    }
+                }
+                return true;
+            };
+
+            const checkPlayerDefeated = (playerId) => {
+                return checkPlayerDefeatedWithShot(playerId, '', '', false);
+            };
+
             const makeShot = async (row, col) => {
                 if (!gameState || gameState.phase !== 'playing') return;
                 if (gameState.currentPlayer !== myPlayerId) return;
@@ -247,74 +264,60 @@
                 const targetCell = targetBoard[row]?.[col];
                 const hit = targetCell !== null && targetCell !== undefined && typeof targetCell === 'object';
 
-                // Atışı Firebase'e kaydet
-                await database.ref(`games/${roomCode}/shots/${myPlayerId}/${row}-${col}`).set(hit ? 'hit' : 'miss');
-                setLastShotResult({ result: hit ? 'hit' : 'miss', row, col });
+                try {
+                    // Atışı Firebase'e kaydet
+                    await database.ref(`games/${roomCode}/shots/${myPlayerId}/${row}-${col}`).set(hit ? 'hit' : 'miss');
+                    setLastShotResult({ result: hit ? 'hit' : 'miss', row, col });
 
-                // Gemi batırma tespiti: mevcut gameState.shots + yeni atışı birlikte hesapla
-                const targetDefeated = checkPlayerDefeatedWithShot(targetPlayer, myPlayerId, `${row}-${col}`, hit);
-                if (targetDefeated) {
-                    await database.ref(`games/${roomCode}/players/${targetPlayer}/defeated`).set(true);
-                    const allPlayerIds = Object.keys(gameState.players);
-                    const alivePlayers = allPlayerIds.filter(pid => {
-                        if (pid === targetPlayer) return false; // yeni batırılan
-                        return !gameState.players[pid].defeated;
-                    });
-                    if (alivePlayers.length === 1) {
-                        await database.ref(`games/${roomCode}`).update({ phase: 'finished', winner: myPlayerId });
-                        setShotInProgress(false);
-                        return;
-                    }
-                }
-
-                if (!hit) {
-                    // MISS: Firebase'i HEMEN güncelle - sıra geçsin, bekleme yok
-                    const allPlayerIds = Object.keys(gameState.players);
-                    const currentIndex = allPlayerIds.indexOf(myPlayerId);
-                    let nextIndex = (currentIndex + 1) % allPlayerIds.length;
-                    while (gameState.players[allPlayerIds[nextIndex]]?.defeated || allPlayerIds[nextIndex] === targetPlayer && targetDefeated) {
-                        nextIndex = (nextIndex + 1) % allPlayerIds.length;
-                    }
-                    await database.ref(`games/${roomCode}/currentPlayer`).set(allPlayerIds[nextIndex]);
+                    // Gemi batırma tespiti: mevcut gameState.shots + yeni atışı birlikte hesapla
+                    const targetDefeated = checkPlayerDefeatedWithShot(targetPlayer, myPlayerId, `${row}-${col}`, hit);
                     
-                    // Sonuç göster, sonra UI temizle
-                    setTimeout(() => {
-                        setTargetPlayer(null);
-                        setLastShotResult(null);
-                        setShotInProgress(false);
-                    }, 2000);
-                } else {
-                    // HIT: Aynı oyuncu oynamaya devam eder, hedef sıfırla
-                    setTimeout(() => {
-                        setTargetPlayer(null);
-                        setLastShotResult(null);
-                        setShotInProgress(false);
-                    }, 1500);
-                }
-            };
-
-            // Mevcut gameState'e + yeni atışı dahil ederek gemi batırma kontrolü
-            const checkPlayerDefeatedWithShot = (playerId, shooterId, shotKey, shotIsHit) => {
-                const board = gameState.players[playerId]?.board;
-                if (!board) return true;
-                const allShots = gameState.shots || {};
-                for (let i = 0; i < GRID_SIZE; i++) {
-                    for (let j = 0; j < GRID_SIZE; j++) {
-                        if (board[i][j] !== null && typeof board[i][j] === 'object') {
-                            const key = `${i}-${j}`;
-                            const isHit = Object.keys(allShots).some(sid => {
-                                if (sid === playerId) return false;
-                                return allShots[sid]?.[key] === 'hit';
-                            }) || (key === shotKey && shooterId !== playerId && shotIsHit);
-                            if (!isHit) return false;
+                    if (targetDefeated) {
+                        await database.ref(`games/${roomCode}/players/${targetPlayer}/defeated`).set(true);
+                        const allPlayerIds = Object.keys(gameState.players);
+                        const alivePlayers = allPlayerIds.filter(pid => {
+                            if (pid === targetPlayer) return false; // yeni batırılan
+                            return !gameState.players[pid].defeated;
+                        });
+                        if (alivePlayers.length === 1) {
+                            await database.ref(`games/${roomCode}`).update({ phase: 'finished', winner: myPlayerId });
+                            setShotInProgress(false);
+                            return;
                         }
                     }
-                }
-                return true;
-            };
 
-            const checkPlayerDefeated = (playerId) => {
-                return checkPlayerDefeatedWithShot(playerId, '', '', false);
+                    if (!hit) {
+                        // MISS: Firebase'i HEMEN güncelle - sıra geçsin, bekleme yok
+                        const allPlayerIds = Object.keys(gameState.players);
+                        const currentIndex = allPlayerIds.indexOf(myPlayerId);
+                        let nextIndex = (currentIndex + 1) % allPlayerIds.length;
+                        
+                        // Sonraki oyuncuyu bul (elenmişse veya yeni batırılmış hedekse atla)
+                        while (gameState.players[allPlayerIds[nextIndex]]?.defeated || (allPlayerIds[nextIndex] === targetPlayer && targetDefeated)) {
+                            nextIndex = (nextIndex + 1) % allPlayerIds.length;
+                            if (nextIndex === currentIndex) break; // Sonsuz döngü koruması
+                        }
+                        
+                        await database.ref(`games/${roomCode}/currentPlayer`).set(allPlayerIds[nextIndex]);
+                        
+                        // Sonuç göster, sonra UI temizle
+                        setTimeout(() => {
+                            setTargetPlayer(null);
+                            setLastShotResult(null);
+                            setShotInProgress(false);
+                        }, 2000);
+                    } else {
+                        // HIT: Aynı oyuncu oynamaya devam eder, hedef sıfırla
+                        setTimeout(() => {
+                            setTargetPlayer(null);
+                            setLastShotResult(null);
+                            setShotInProgress(false);
+                        }, 1500);
+                    }
+                } catch (error) {
+                    console.error("Atış sırasında hata oluştu:", error);
+                    setShotInProgress(false); // Herhangi bir hatada kilidi kesin olarak kaldır
+                }
             };
 
             const renderCell = (row, col, isMyBoard, targetPlayerId = null) => {
