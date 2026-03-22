@@ -56,9 +56,9 @@
 {
   "rules": {
     "games": {
+      ".read": true,
+      ".write": true,
       "$roomCode": {
-        ".read": true,
-        ".write": true,
         ".indexOn": ["createdAt"]
       }
     }
